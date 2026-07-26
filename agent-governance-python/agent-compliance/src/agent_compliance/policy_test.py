@@ -80,7 +80,7 @@ class ReplayReport:
 
     @property
     def ok(self) -> bool:
-        return self.failed == 0
+        return self.total > 0 and self.failed == 0
 
     @property
     def mismatches(self) -> list[FixtureResult]:
@@ -174,6 +174,31 @@ def _normalize_verdict(decision_action: str, decision_allowed: bool) -> str:
     return decision_action
 
 
+def _validate_fixtures(fixtures: list[dict[str, Any]], fixture_path: Path) -> None:
+    """Reject fixture suites that cannot make a pass/fail assertion."""
+    if not fixtures:
+        raise ValueError(f"No fixtures found in {fixture_path}")
+
+    invalid: list[str] = []
+    for fixture in fixtures:
+        if any(
+            key in fixture
+            for key in ("expected_verdict", "expected_action", "expected_allowed")
+        ):
+            continue
+
+        fixture_id = fixture.get("id") or fixture.get("name", "unnamed")
+        source = fixture.get("_source", str(fixture_path))
+        invalid.append(
+            f"fixture {fixture_id!r} in {source!r} must define expected_verdict, "
+            "expected_action, or expected_allowed"
+        )
+
+    if invalid:
+        details = "\n".join(f"- {message}" for message in invalid)
+        raise ValueError(f"Invalid policy test fixture(s):\n{details}")
+
+
 def replay(
     policy_path: str | Path,
     fixture_path: str | Path,
@@ -213,6 +238,7 @@ def replay(
 
     # Load and replay fixtures
     fixtures = _load_fixtures(fixture_path)
+    _validate_fixtures(fixtures, fixture_path)
     report = ReplayReport()
 
     for fixture in fixtures:
@@ -226,13 +252,6 @@ def replay(
         # Also support expected_allowed (boolean) from tutorial format
         expected_allowed = fixture.get("expected_allowed")
         resolution_metadata = fixture.get("resolution_metadata")
-
-        if expected_verdict is None and expected_allowed is None:
-            logger.warning(
-                "Fixture %r has no expected_verdict or expected_allowed — skipping",
-                fixture_id,
-            )
-            continue
 
         decision = evaluator.evaluate(context)
         actual_verdict = _normalize_verdict(decision.action, decision.allowed)
