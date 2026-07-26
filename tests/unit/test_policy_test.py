@@ -220,11 +220,55 @@ class TestReplay:
         report = replay(policy, fixture_dir)
         assert report.ok
 
+    def test_missing_expectation_raises(self, tmp_path: Path) -> None:
+        policy = _write_policy(tmp_path)
+        fixtures = _write_fixtures_json(
+            tmp_path,
+            [{"id": "missing-expectation", "input": {"action": "read"}}],
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="fixture 'missing-expectation'.*must define expected_verdict",
+        ):
+            replay(policy, fixtures)
+
+    def test_empty_fixture_file_raises(self, tmp_path: Path) -> None:
+        policy = _write_policy(tmp_path)
+        fixtures = tmp_path / "fixtures.json"
+        fixtures.write_text("[]")
+
+        with pytest.raises(ValueError, match="No fixtures found"):
+            replay(policy, fixtures)
+
+    def test_malformed_fixture_in_mixed_suite_raises(self, tmp_path: Path) -> None:
+        policy = _write_policy(tmp_path)
+        fixtures = _write_fixtures_json(
+            tmp_path,
+            [
+                {
+                    "id": "valid",
+                    "input": {"action": "read"},
+                    "expected_verdict": "allow",
+                },
+                {"id": "malformed", "input": {"action": "write"}},
+            ],
+        )
+
+        with pytest.raises(ValueError, match="fixture 'malformed'"):
+            replay(policy, fixtures)
+
 
 # ── Report ─────────────────────────────────────────────────────────────
 
 
 class TestReplayReport:
+    def test_empty_report_is_not_successful(self) -> None:
+        report = ReplayReport()
+
+        assert report.total == 0
+        assert report.ok is False
+
     def test_to_dict(self) -> None:
         report = ReplayReport(
             results=[
